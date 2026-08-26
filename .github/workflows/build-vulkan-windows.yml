@@ -1,0 +1,49 @@
+name: Build whisper.cpp Vulkan Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-vulkan:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.1.1
+        with:
+          version: 1.3.290.0
+          cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DGGML_VULKAN=ON `
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --target whisper-cli -j
+
+      - name: Collect DLLs
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact
+          Copy-Item build\bin\Release\whisper-cli.exe artifact\
+          Copy-Item build\bin\Release\ggml.dll artifact\
+          Copy-Item build\bin\Release\ggml-base.dll artifact\
+          Copy-Item build\bin\Release\ggml-cpu.dll artifact\
+          Copy-Item build\bin\Release\ggml-vulkan.dll artifact\
+          Copy-Item build\bin\Release\whisper.dll artifact\
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-vulkan-windows-x64
+          path: artifact/*
