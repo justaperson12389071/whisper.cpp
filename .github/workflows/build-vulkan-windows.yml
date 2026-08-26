@@ -1,60 +1,49 @@
-name: Build whisper.cpp Vulkan Windows
+name: Build whisper.cpp Vulkan Windows (MSYS2)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-vulkan:
+  build-vulkan-msys2:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Clone
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Cache Vulkan SDK
-        uses: actions/cache@v4
-        id: cache-vulkan
+      - name: Setup MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
         with:
-          path: C:\VulkanSDK\1.3.290.0
-          key: vulkan-sdk-1.3.290.0-windows
+          update: true
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-vulkan-devel
+            mingw-w64-ucrt-x86_64-shaderc
 
-      - name: Install Vulkan SDK
-        if: steps.cache-vulkan.outputs.cache-hit != 'true'
-        shell: pwsh
+      - name: Build with Vulkan
+        shell: msys2 {0}
         run: |
-          $url = "https://sdk.lunarg.com/sdk/download/1.3.290.0/windows/VulkanSDK-1.3.290.0-Installer.exe"
-          $out = "$env:TEMP\vulkan-installer.exe"
-          Invoke-WebRequest -Uri $url -OutFile $out
-          Start-Process -FilePath $out -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
+          cmake -B build -G Ninja -DGGML_VULKAN=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j $(nproc)
 
-      - name: Setup Vulkan Environment
-        shell: pwsh
+      - name: Collect artifacts
+        shell: msys2 {0}
         run: |
-          echo "VULKAN_SDK=C:\VulkanSDK\1.3.290.0" >> $env:GITHUB_ENV
-          echo "C:\VulkanSDK\1.3.290.0\Bin" >> $env:GITHUB_PATH
-
-      - name: Configure & Build
-        shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -DGGML_VULKAN=ON -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release --target whisper-cli -j
-
-      - name: Collect DLLs
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path artifact
-          Copy-Item build\bin\Release\whisper-cli.exe artifact\
-          Copy-Item build\bin\Release\ggml.dll artifact\
-          Copy-Item build\bin\Release\ggml-base.dll artifact\
-          Copy-Item build\bin\Release\ggml-cpu.dll artifact\
-          Copy-Item build\bin\Release\ggml-vulkan.dll artifact\
-          Copy-Item build\bin\Release\whisper.dll artifact\
+          mkdir artifact
+          cp build/bin/whisper-cli.exe artifact/
+          cp build/bin/*.dll artifact/ 2>/dev/null || true
+          # Копируем системные DLL из MSYS2, нужные для запуска без MSYS2
+          for dll in vulkan-1.dll libgcc_s_seh-1.dll libwinpthread-1.dll libstdc++-6.dll libgomp-1.dll; do
+            cp /ucrt64/bin/$dll artifact/ 2>/dev/null || true
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: whisper-vulkan-windows-x64
+          name: whisper-vulkan-msys2-x64
           path: artifact/*
